@@ -1,0 +1,26 @@
+{
+  "name": "pi-rsi-top",
+  "version": "0.1.0",
+  "description": "RSI-top for pi-autoresearch: a per-trajectory metric dashboard, frontier stall detection, and diversity-controlled intervention cohorts that escape exploration collapse.",
+  "keywords": ["pi-package", "autoresearch", "rsi-top", "exploration-collapse", "dashboard"],
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "bin": { "rsi-top": "./bin/rsi-top.mjs" },
+  "pi": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "files": ["bin", "src", "hooks", "README.md", "SPEC.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
