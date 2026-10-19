@@ -80,6 +80,15 @@ function parseArgs(argv: string[]): Args {
   return { command, positional: rest, flags };
 }
 
+/**
+ * A bare `--help` / `-h` anywhere means help. Without this, `--help` is parsed as a flag
+ * with no command, the command defaults to `report`, and asking for help silently prints a
+ * report about the current directory instead.
+ */
+function wantsHelp(argv: string[]): boolean {
+  return argv.some((a) => a === "--help" || a === "-h");
+}
+
 function flagString(args: Args, name: string): string | undefined {
   const value = args.flags.get(name);
   return typeof value === "string" ? value : undefined;
@@ -343,11 +352,16 @@ async function cmdHook(event: string, workDir: string): Promise<number> {
 // ---------------------------------------------------------------------------
 
 export async function main(argv: string[]): Promise<number> {
+  if (wantsHelp(argv)) {
+    console.log(USAGE);
+    return 0;
+  }
+
   const args = parseArgs(argv);
   const json = args.flags.has("json");
   const force = args.flags.has("force");
 
-  if (args.command === "--help" || args.command === "-h" || args.command === "help") {
+  if (args.command === "help") {
     console.log(USAGE);
     return 0;
   }
