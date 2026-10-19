@@ -105,3 +105,15 @@ export function createGitCodeDistance(cwd: string): CodeDistance | null {
     return similarity;
   };
 }
+/**
+ * Work-dir-scoped `CodeDistance` for callers that only have a path (the hook, the CLI, the
+ * extension). Returns `null` outside a git work tree — so lineage spread honestly falls back
+ * to epoch spacing instead of pretending the commits are equidistant.
+ */
+export function codeDistanceFor(workDir: string): CodeDistance | null {
+  try {
+    return createGitCodeDistance(workDir);
+  } catch {
+    return null;
+  }
+}

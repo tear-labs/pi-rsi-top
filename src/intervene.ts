@@ -80,7 +80,9 @@ export function buildCohortPlan(
   session: SessionSnapshot,
   stall: StallState,
   cfg: RsiConfig,
-  opts?: { seed?: number; epoch?: number; metrics?: MetricSpec[]; codeDistance?: CodeDistance },
+  // `codeDistance: null` is the honest "not in a git work tree" signal from codeDistanceFor(),
+  // so it is accepted here and treated exactly like an absent distance.
+  opts?: { seed?: number; epoch?: number; metrics?: MetricSpec[]; codeDistance?: CodeDistance | null },
 ): CohortPlan {
   const metrics = opts?.metrics ?? metricSpecs();
   if (metrics.length === 0) throw new Error("buildCohortPlan: metric set is empty");
@@ -96,7 +98,7 @@ export function buildCohortPlan(
   const portfolioSize = Math.max(1, Math.min(cfg.portfolioSize, candidates.length));
   // Lineage spread uses code distance when the caller supplies it (the effectful layer can);
   // otherwise it falls back to evenly spaced improvement epochs, which is still distinct.
-  const lineages = selectLineages(runs, cohort, rng, opts?.codeDistance);
+  const lineages = selectLineages(runs, cohort, rng, opts?.codeDistance ?? undefined);
 
   const arms: CohortArm[] = [];
   for (let index = 0; index < cohort; index += 1) {

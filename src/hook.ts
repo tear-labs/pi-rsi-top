@@ -24,6 +24,7 @@ import { readSession, toHookSession } from "./autoresearch.ts";
 import { appendJsonl, configPath, ensureDir, plansPath, readJsonFile, rsiDir } from "./paths.ts";
 import { dashboardPathFor, scoreAndAppend } from "./dashboard.ts";
 import { detectStall } from "./stall.ts";
+import { codeDistanceFor } from "./code-distance.ts";
 import { buildCohortPlan, renderSteer } from "./intervene.ts";
 
 /** Merge a partial on-disk config over the defaults, ignoring unknown/garbage keys. */
@@ -147,7 +148,9 @@ export function handleBefore(payload: BeforeHookPayload, workDir: string): strin
   const stall = detectStall(runs, session, cfg.stall, hookNow());
   if (!stall.stalled) return "";
 
-  const plan = buildCohortPlan(runs, session, stall, cfg);
+  const plan = buildCohortPlan(runs, session, stall, cfg, {
+    codeDistance: codeDistanceFor(workDir),
+  });
   try {
     ensureDir(rsiDir(workDir, cfg.stateDir));
     appendJsonl(plansPath(workDir, cfg.stateDir), [plan]);

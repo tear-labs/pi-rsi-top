@@ -8,7 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { computeRowValues } from "./metrics.ts";
-import { createGitCodeDistance } from "./code-distance.ts";
+import { codeDistanceFor } from "./code-distance.ts";
 import type {
   DashboardRow,
   MetricContext,
@@ -184,13 +184,7 @@ export function scoreAndAppend(
   // Code distance needs git, so it is resolved here (the effectful layer) and injected
   // into the pure metric computation. Outside a git work tree this is null and the four
   // commit-derived metrics honestly read as unknown.
-  const codeDistance = (() => {
-    try {
-      return createGitCodeDistance(workDir);
-    } catch {
-      return null;
-    }
-  })();
+  const codeDistance = codeDistanceFor(workDir);
   const existingRows = readRows(dashPath);
   const existingKeys = new Set(existingRows.map((r) => `${r.segment}:${r.run}`));
 

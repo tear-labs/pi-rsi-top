@@ -25,6 +25,7 @@ import { metricSpecs } from "./metrics.ts";
 import { buildRows, readRows, scoreAndAppend } from "./dashboard.ts";
 import { detectStall } from "./stall.ts";
 import { buildCohortPlan, renderSteer } from "./intervene.ts";
+import { codeDistanceFor } from "./code-distance.ts";
 import { hookNow, loadConfig } from "./hook.ts";
 
 const USAGE = `rsi-top — metric dashboard + stall detection + diversity-controlled interventions
@@ -269,7 +270,9 @@ function cmdIntervene(workDir: string, cfg: RsiConfig, force: boolean, json: boo
     console.log(`not stalled — ${stall.reason}\n(use --force to build a plan anyway)`);
     return;
   }
-  const plan = buildCohortPlan(runs, session, stall, cfg);
+  const plan = buildCohortPlan(runs, session, stall, cfg, {
+    codeDistance: codeDistanceFor(workDir),
+  });
   ensureState(workDir, cfg);
   appendJsonl(plansPath(workDir, cfg.stateDir), [plan]);
   if (json) {

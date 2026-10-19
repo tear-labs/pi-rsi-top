@@ -20,6 +20,7 @@ import { loadConfig } from "./hook.ts";
 import { detectStall } from "./stall.ts";
 import { readSession } from "./autoresearch.ts";
 import { buildCohortPlan, renderSteer } from "./intervene.ts";
+import { codeDistanceFor } from "./code-distance.ts";
 import { buildRows, readRows, scoreAndAppend } from "./dashboard.ts";
 import { metricSpecs } from "./metrics.ts";
 import { dashboardPath } from "./paths.ts";
@@ -75,7 +76,9 @@ const checkTool = defineTool<typeof CHECK_PARAMS, CheckDetails>({
         details: { stalled: false, state, plan: null },
       };
     }
-    const plan = buildCohortPlan(runs, session, state, cfg);
+    const plan = buildCohortPlan(runs, session, state, cfg, {
+      codeDistance: codeDistanceFor(workDir),
+    });
     head.push("", renderSteer(plan, runs, session, state, cfg));
     return {
       content: [{ type: "text", text: head.join("\n") }],
@@ -140,7 +143,10 @@ const interveneTool = defineTool({
     const cfg = loadConfig(workDir);
     const { runs, session } = readSession(workDir);
     const state = detectStall(runs, session, cfg.stall);
-    const plan = buildCohortPlan(runs, session, state, cfg, { seed: params.seed });
+    const plan = buildCohortPlan(runs, session, state, cfg, {
+      seed: params.seed,
+      codeDistance: codeDistanceFor(workDir),
+    });
     return {
       content: [{ type: "text", text: renderSteer(plan, runs, session, state, cfg) }],
       details: { plan },
@@ -175,7 +181,9 @@ export default function (pi: ExtensionAPI) {
       const state = detectStall(runs, session, cfg.stall);
 
       if (sub === "intervene") {
-        const plan = buildCohortPlan(runs, session, state, cfg);
+        const plan = buildCohortPlan(runs, session, state, cfg, {
+      codeDistance: codeDistanceFor(workDir),
+    });
         pi.sendUserMessage(renderSteer(plan, runs, session, state, cfg));
         return;
       }
