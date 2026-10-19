@@ -61,11 +61,30 @@ function metricMapFrom(value: unknown): Record<string, number> {
   return metrics;
 }
 
+/**
+ * A missing or non-numeric `metric` becomes `NaN`, not `0`.
+ *
+ * This is load-bearing. `frontier.ts`'s `isValidMetric` already rejects non-finite values,
+ * so `NaN` makes the run ineligible to move the frontier — which is exactly right for a
+ * trajectory whose evaluator did not report a number. Coercing it to `0` instead would make
+ * it the *best possible* result on a lower-is-better metric: it would win the frontier and,
+ * because winning resets the epoch clock, silently blind the stall monitor.
+ *
+ * Every formatter in the package renders `NaN` as an em dash.
+ */
+function metricFrom(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
+}
+
 function statusFrom(value: unknown): RunStatus {
+  if (value === "keep") return "keep";
   if (value === "discard") return "discard";
   if (value === "crash") return "crash";
   if (value === "checks_failed") return "checks_failed";
-  return "keep";
+  // An unrecognized status must not default to `keep`. `keep` is the one status that can
+  // move the frontier, so assuming it turns a malformed entry into a candidate winner.
+  // `hook.ts` already resolves unknown statuses to `discard`; match that.
+  return "discard";
 }
 
 function directionFrom(value: unknown): Direction {
@@ -80,7 +99,7 @@ function runFrom(entry: JsonObject, segment: number): Run {
   const run: Run = {
     run: typeof entry.run === "number" ? entry.run : 0,
     commit: typeof entry.commit === "string" ? entry.commit : "",
-    metric: typeof entry.metric === "number" ? entry.metric : 0,
+    metric: metricFrom(entry.metric),
     metrics: metricMapFrom(entry.metrics),
     status: statusFrom(entry.status),
     description: typeof entry.description === "string" ? entry.description : "",

@@ -151,12 +151,15 @@ describe("parseLog: tolerance", () => {
     assert.deepEqual(runs[1]!.metrics, {});
   });
 
-  it("tolerates missing optional fields with host defaults", () => {
+  it("tolerates missing optional fields without inventing a metric", () => {
     const { runs } = parseLog(line({ run: 1 }));
     const r = runs[0]!;
     assert.equal(r.commit, "");
-    assert.equal(r.metric, 0);
-    assert.equal(r.status, "keep");
+    // A missing metric must NOT become 0: on a lower-is-better metric that would be the best
+    // possible score, would take the frontier, and would reset the stall clock.
+    assert.ok(Number.isNaN(r.metric), `expected NaN, got ${r.metric}`);
+    // An unrecognized status must not default to `keep`, the one frontier-eligible status.
+    assert.equal(r.status, "discard");
     assert.equal(r.description, "");
     assert.equal(r.timestamp, 0);
     assert.equal(r.confidence, null);

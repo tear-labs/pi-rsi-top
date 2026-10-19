@@ -36,6 +36,7 @@ const ALL_METRIC_SPECS: readonly MetricSpec[] = [
     kind: "unary",
     description: "Primary metric value for this trajectory (clock cycles or objective score)",
     better: "lower",
+    mirrorsObjective: true,
   },
   {
     name: "valid_attempt",
@@ -174,6 +175,7 @@ const ALL_METRIC_SPECS: readonly MetricSpec[] = [
     kind: "global",
     description: "Best authoritative metric observed among subtree trajectories rooted at this run",
     better: "lower",
+    mirrorsObjective: true,
   },
   {
     name: "frontier_improvement_count",

@@ -17,6 +17,7 @@ import type {
   DashboardRow,
   DirectionArm,
   MetricSpec,
+  Direction,
   RsiConfig,
   Run,
   SessionSnapshot,
@@ -38,10 +39,25 @@ function rowsFor(runs: Run[], session: SessionSnapshot): DashboardRow[] {
  * targets one axis of the dashboard. The dashboard is what makes these comparable,
  * so the candidates are the metrics themselves, phrased as actions.
  */
-export function directionCandidates(metrics: MetricSpec[]): string[] {
+export function directionCandidates(
+  metrics: MetricSpec[],
+  direction: Direction = "lower",
+): string[] {
   return [...metrics]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((m) => (m.better === "higher" ? `raise ${m.name}` : `reduce ${m.name}`));
+    .map((m) => {
+      // The metric set hardcodes `better` for the two metrics that simply *mirror* the
+      // optimization objective: `cycles` (the primary metric) and `best_descendant_metric`
+      // (a subtree's best primary value). On a higher-is-better run those two must flip, or
+      // the steer tells the agent to "reduce cycles" — i.e. to lower its own score.
+      const better =
+        m.mirrorsObjective === true
+          ? direction
+          : m.better === "higher"
+            ? "higher"
+            : "lower";
+      return better === "higher" ? `raise ${m.name}` : `reduce ${m.name}`;
+    });
 }
 
 /** Short, arm-local view of the dashboard: only the metrics this arm can see. */
@@ -92,13 +108,19 @@ export function buildCohortPlan(
   const rng = makeRng(seed);
 
   const rows = rowsFor(runs, session);
-  const candidates = directionCandidates(metrics);
+  const candidates = directionCandidates(metrics, session.direction);
   const cohort = Math.max(1, Math.min(cfg.cohortSize, candidates.length));
   const subsetSize = Math.max(1, Math.min(cfg.metricSubsetSize, metricNames.length));
   const portfolioSize = Math.max(1, Math.min(cfg.portfolioSize, candidates.length));
   // Lineage spread uses code distance when the caller supplies it (the effectful layer can);
   // otherwise it falls back to evenly spaced improvement epochs, which is still distinct.
-  const lineages = selectLineages(runs, cohort, rng, opts?.codeDistance ?? undefined);
+  const lineages = selectLineages(
+    runs,
+    cohort,
+    rng,
+    opts?.codeDistance ?? undefined,
+    session.direction,
+  );
 
   const arms: CohortArm[] = [];
   for (let index = 0; index < cohort; index += 1) {
@@ -198,17 +220,28 @@ export function renderSteer(
     : `${Math.round(stall.stalledForMs / 1000)} s`;
 
   const header: string[] = [];
-  header.push("## RSI-top: frontier stalled — exploration collapse likely");
+  // "Stalled" is the observation; "collapsed" is a hypothesis. The RSI-top paper is explicit
+  // that a stall alone does not establish exploration collapse — a search can be flat because
+  // the problem is nearly solved, or because the evaluator is noisy. Saying "collapse likely"
+  // states as fact something we cannot see, and an agent will believe it.
+  header.push("## RSI-top: frontier stalled — exploring that as possible exploration collapse");
   header.push("");
   header.push(
     `Frontier ${plan.frontier === null ? "(none)" : formatNumber(plan.frontier)}${
       plan.frontierRun === null ? "" : ` (run ${plan.frontierRun})`
     } has not moved by >= ${cfg.stall.minGain} (${session.direction} is better) for ${staleness} of wall clock ` +
-      `and ${stall.stalledForRuns} trajectories. Your recent proposals are probably narrowing onto one direction.`,
+      `and ${stall.stalledForRuns} trajectories.`,
   );
   header.push("");
   header.push(
-    `Do not keep refining the current idea. Below are ${plan.arms.length} intervention arms, each with a different ` +
+    `A stall is not proof of collapse — the run may be near its ceiling, or the metric may be ` +
+      `noisy. It is a reason to diversify, not a diagnosis. One symptom would be proposals ` +
+      `narrowing onto a single direction; if you can see that in your recent attempts, treat ` +
+      `collapse as likely.`,
+  );
+  header.push("");
+  header.push(
+    `Either way, do not keep refining the current idea. Below are ${plan.arms.length} intervention arms, each with a different ` +
       `dashboard view, a probability-weighted portfolio of directions, and its own lineage. ` +
       `Propose one change per arm and run them in parallel; do not let the arms read the same trajectories.`,
   );
@@ -217,12 +250,23 @@ export function renderSteer(
   const detailBudget = STEER_MAX_BYTES - 900;
   const armBlocks = plan.arms.map((arm) => renderArm(arm, byRun, plan));
   let body = "";
+  let rendered = 0;
   for (const block of armBlocks) {
     if (Buffer.byteLength(header.join("\n") + body + block, "utf8") > detailBudget) {
       body += `\n(_remaining arms omitted for size; see .auto/rsi/interventions.jsonl for the full plan ${plan.id}._)\n`;
       break;
     }
     body += block;
+    rendered += 1;
+  }
+  // The header counts arms before the byte budget has dropped any. With a long history and a
+  // large cohort it said "Below are 24 intervention arms" and then printed 2, which reads as
+  // a bug in the tool rather than a size limit.
+  if (rendered < plan.arms.length) {
+    header[header.length - 2] = header[header.length - 2]!.replace(
+      `Below are ${plan.arms.length} intervention arms`,
+      `Below are ${rendered} of ${plan.arms.length} intervention arms`,
+    );
   }
 
   const footer = [

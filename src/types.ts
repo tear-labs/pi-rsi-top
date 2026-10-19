@@ -76,6 +76,13 @@ export interface MetricSpec {
   description: string;
   /** "higher" = larger value is a better trajectory signal. */
   better: "higher" | "lower";
+  /**
+   * Set on the metrics that *are* the optimization objective in disguise (`cycles`, the
+   * primary metric, and `best_descendant_metric`, a subtree's best primary value). Their
+   * hardcoded `better` is only a default; the session's declared direction wins, because
+   * otherwise a higher-is-better run gets told to "reduce cycles".
+   */
+  mirrorsObjective?: boolean;
 }
 
 /** Optional injected context so pure metric computation never touches disk or git. */

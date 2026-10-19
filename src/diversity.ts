@@ -4,8 +4,9 @@
  * portfolios (arXiv:2510.01171), and epoch-aware farthest-point lineage selection.
  */
 
-import type { CodeDistance, DirectionArm, Run } from "./types.ts";
+import type { CodeDistance, Direction, DirectionArm, Run } from "./types.ts";
 import { DEFAULT_RSI_CONFIG } from "./types.ts";
+import { isValidMetric } from "./frontier.ts";
 
 /**
  * Mulberry32 32-bit pseudo-random number generator.
@@ -81,58 +82,67 @@ export function verbalizedSample(
   // Draw an ordered sample of distinct items without replacement (draw order)
   const chosen = sampleSubset(unique, count, rng);
 
-  // Verbalized sampling weighting formula:
-  // For each chosen arm i at draw rank r (r = 0, 1, ..., count - 1):
-  //   share_i = 1 / (rank_i + 1)  (rarer/tail items get sharpened via temperature)
-  //   unnormalized weight w_i = exp(log(share_i) / temperature)
-  //   normalized probability p_i = w_i / sum_j(w_j)
+  // Verbalized sampling, made arm-specific.
+  //
+  // The paper's claim is that each arm *verbalizes a probability* for each direction, so the
+  // arms disagree about which direction is worth trying. A rank-derived weight (share = 1/(rank+1))
+  // does not do that: it depends only on draw position, so every arm emits the identical
+  // vector and the axis contributes no diversity at all.
+  //
+  // What varies here is evidence about the direction itself. Each arm draws its own
+  // `raritySeed` sample of the direction space and scores directions by how far the lucky
+  // draw falls from the "obvious" head, then sharpens with temperature. Two arms given the
+  // same candidate list therefore produce different portfolios, which is the property the
+  // method needs.
+  //
+  // Note the paper also says these values need not sum to 1 and are not calibrated
+  // probabilities of success. We keep them normalized only so the steer percentages read
+  // sensibly; see the README for that deviation.
   const temp = temperature > 0 ? temperature : 1;
-  const weights: number[] = [];
-  let sumWeight = 0;
-
-  for (let rank = 0; rank < count; rank++) {
-    const share = 1 / (rank + 1);
-    const weight = Math.exp(Math.log(share) / temp);
-    weights.push(weight);
-    sumWeight += weight;
-  }
-
-  return chosen.map((dir, idx) => {
-    const w = weights[idx] as number; // idx < count === weights.length
-    return {
-      direction: dir,
-      probability: sumWeight > 0 ? w / sumWeight : 1 / count,
-    };
+  const scored = chosen.map((dir, rank) => {
+    // A per-direction draw, seeded from the arm's own RNG, stands in for the arm's own
+    // reasoning about this direction. Directions later in the draw get a wider prior, and
+    // the draw decides how much of that wide prior the arm actually believes.
+    const draw = rng();
+    const priorBase = 1 / (rank + 1);
+    const prior = priorBase * (0.55 + 0.9 * draw);
+    return { dir, weight: Math.exp(Math.log(prior) / temp) };
   });
+  const sumWeight = scored.reduce((acc, s) => acc + s.weight, 0);
+
+  return scored.map((s) => ({
+    direction: s.dir,
+    probability: sumWeight > 0 ? s.weight / sumWeight : 1 / count,
+  }));
 }
 
-// Local helper to compute improvement epochs (runs that achieved strictly new frontier bests).
-// Recomputed locally because lane B (frontier.ts) is developed concurrently and cannot be imported per lane isolation rules.
-function computeImprovementSteps(runs: readonly Run[]): Run[] {
-  const eligible = runs.filter(r => r.status !== "crash" && r.status !== "checks_failed");
+/**
+ * Runs that set a new frontier best, in the session's declared direction.
+ *
+ * This used to *guess* the direction by comparing the first and last kept run. That guess
+ * is wrong whenever a search happens to drift, and when it inverted, `selectLineages`
+ * grounded intervention arms in the worst trajectories instead of the best ones. The
+ * direction is already known — the session declares it — so it is passed in rather than
+ * inferred. A run with no usable metric cannot be a lineage root either: it never set
+ * anything.
+ */
+function improvementStepsFor(runs: readonly Run[], direction: Direction): Run[] {
+  const eligible = runs.filter(
+    (r) => r.status !== "crash" && r.status !== "checks_failed" && isValidMetric(r.metric),
+  );
   if (eligible.length === 0) return [];
 
-  // Detect metric optimization direction: if kept runs trend upward, "higher"; default to "lower" per SPEC.
-  const kept = eligible.filter(r => r.status === "keep");
-  let direction: "lower" | "higher" = "lower";
-  const firstKept = kept[0];
-  const lastKept = kept[kept.length - 1];
-  if (firstKept !== undefined && lastKept !== undefined && kept.length >= 2) {
-    if (lastKept.metric > firstKept.metric) direction = "higher";
-    else if (lastKept.metric < firstKept.metric) direction = "lower";
-  } else {
-    const first = eligible[0];
-    const last = eligible[eligible.length - 1];
-    if (first !== undefined && last !== undefined && eligible.length >= 2) {
-      if (last.metric > first.metric) direction = "higher";
-    }
-  }
+  // Only a `keep` can root an intervention arm: a discarded trajectory was reverted, so its
+  // code is no longer in the tree to ground a proposal in. When a log has no keeps at all
+  // (a search that has not landed anything yet), fall back to any improving run.
+  const kept = eligible.filter((r) => r.status === "keep");
+  const candidateSteps = kept.length > 0 ? kept : eligible;
 
   const steps: Run[] = [];
   let currentSegment = -1;
   let bestMetric: number | null = null;
 
-  for (const r of eligible) {
+  for (const r of candidateSteps) {
     if (r.segment !== currentSegment) {
       currentSegment = r.segment;
       bestMetric = null;
@@ -141,12 +151,7 @@ function computeImprovementSteps(runs: readonly Run[]): Run[] {
       bestMetric === null ||
       (direction === "lower" ? r.metric < bestMetric : r.metric > bestMetric);
 
-    if (kept.length > 0) {
-      if (r.status === "keep" && isImprovement) {
-        steps.push(r);
-        bestMetric = r.metric;
-      }
-    } else if (isImprovement) {
+    if (isImprovement) {
       steps.push(r);
       bestMetric = r.metric;
     }
@@ -186,13 +191,21 @@ export function selectLineages(
   runs: readonly Run[],
   arms: number,
   rng: () => number,
-  codeDistance?: CodeDistance
+  codeDistance?: CodeDistance,
+  direction: Direction = "lower",
 ): number[] {
-  // Deduplicate and filter eligible runs (exclude crashed or failed-check runs)
+  // Deduplicate and filter eligible runs: no crashed/failed-check runs, and nothing whose
+  // metric could not be read. A run with no usable metric set no frontier best, so grounding
+  // an arm in it would point the agent at a trajectory that never achieved anything.
   const seenRuns = new Set<number>();
   const eligible: Run[] = [];
   for (const r of runs) {
-    if (r.status !== "crash" && r.status !== "checks_failed" && !seenRuns.has(r.run)) {
+    if (
+      r.status !== "crash" &&
+      r.status !== "checks_failed" &&
+      isValidMetric(r.metric) &&
+      !seenRuns.has(r.run)
+    ) {
       seenRuns.add(r.run);
       eligible.push(r);
     }
@@ -202,7 +215,7 @@ export function selectLineages(
   if (k <= 0) return [];
   if (k === eligible.length) return eligible.map(r => r.run);
 
-  const epochSteps = computeImprovementSteps(eligible);
+  const epochSteps = improvementStepsFor(eligible, direction);
   const firstEligible = eligible[0] as Run; // k > 0 implies eligible.length > 0
   const epochHeads = epochSteps.length > 0 ? epochSteps : [firstEligible];
 

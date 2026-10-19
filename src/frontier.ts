@@ -15,7 +15,7 @@ export interface FrontierPoint {
 }
 
 /** Check if a metric value is finite and numeric. */
-function isValidMetric(metric: number): boolean {
+export function isValidMetric(metric: number): boolean {
   return typeof metric === "number" && Number.isFinite(metric);
 }
 
