@@ -194,8 +194,12 @@ const WEB_MAX_LINES = 3;
  * that needs more than three lines to say anything.
  */
 export function compact(lines: string[], max = WEB_MAX_LINES): string[] {
-  const [status, spark] = lines;
-  const head = [status, spark].filter((l): l is string => l !== undefined);
+  const [status = "", spark] = lines;
+  // Pi Web prints the widget key as a heading directly above the content, so a status line
+  // beginning "rsi-top │ " repeats it. Dropping the prefix buys ~10 characters of width for
+  // the metric name, which is the part a reader actually needs.
+  const head: string[] = [status.replace(/^rsi-top │ /, "")];
+  if (spark !== undefined) head.push(spark);
   // A stall warning is the one line worth more than the table; put it in the third slot.
   const warn = lines.find((l) => l.startsWith("⚠"));
   if (warn && head.length < max) head.push(warn);

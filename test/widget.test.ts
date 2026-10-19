@@ -11,6 +11,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { renderWidget, sparkline } from "../src/widget.ts";
+import { compact } from "../src/extension.ts";
 import type { DashboardRow, Run, SessionSnapshot, StallState } from "../src/types.ts";
 
 function run(runNo: number, metric: number, status: Run["status"] = "discard"): Run {
@@ -281,5 +282,42 @@ describe("invalid trajectories", () => {
     const failed: Run = { ...crashed, run: 7, status: "checks_failed" };
     const runs = [run(6, 5.934), failed];
     assert.equal(sparkline(runs, "lower").length, 1);
+  });
+});
+
+describe("pi web compact form", () => {
+  // Pi Web renders a widget as a 108px trigger with the key as a heading, and only expands
+  // the panel when the widget has 2-3 lines. A taller widget is a collapsed tab the user
+  // cannot open, which made the whole thing invisible in the browser.
+  const full = [
+    "rsi-top \u2502 heldout_mean_nll 1.534 (run 1) \u2502 ok \u00b7 flat 0s \u2502 6 runs, 4 keep \u2502 epoch 6",
+    "last 5 \u25b8 \u2588\u2585\u2582\u2581\u2582",
+    "    4 discard          6.881",
+    "    5 crash                \u2014",
+    "    6 keep             5.934",
+  ];
+
+  it("fits in the 2-3 lines pi-web will open", () => {
+    const out = compact(full);
+    assert.ok(out.length >= 2 && out.length <= 3, `got ${out.length} lines`);
+  });
+
+  it("drops the key from the status line, since pi-web prints it as a heading", () => {
+    assert.ok(!compact(full)[0]!.startsWith("rsi-top"), compact(full)[0]);
+    assert.match(compact(full)[0]!, /heldout_mean_nll/);
+  });
+
+  it("keeps the sparkline, which is the fastest read", () => {
+    assert.match(compact(full).join("\n"), /last 5 /);
+  });
+
+  it("promotes the stall warning into the third slot", () => {
+    const stalled = [...full.slice(0, 2), "\u26a0 stall \u2014 /rsi-top intervene for a cohort", ...full.slice(2)];
+    const out = compact(stalled);
+    assert.ok(out.some((l) => l.startsWith("\u26a0")), `stall warning lost: ${out.join(" | ")}`);
+  });
+
+  it("tolerates a one-line widget", () => {
+    assert.equal(compact([full[0]!]).length, 1);
   });
 });
