@@ -242,16 +242,18 @@ function extractChangeCount(run: Run): number | null {
     count += 1;
   }
 
-  for (const [k, v] of Object.entries(asi)) {
-    if (k === "revisits_run" || k === "hypothesis") continue;
-    if (typeof v === "number" && Number.isFinite(v)) {
-      count += v;
-    } else if (v !== null && v !== undefined && v !== "") {
-      count += 1;
-    }
+  // Only keys that plausibly describe *code changes*. Summing every numeric field in `asi`
+  // let a `seed: 42` contribute 42 changes, which is not a measurement of anything.
+  const CHANGE_KEYS = ["changes_made", "edit_count", "files_changed", "num_changes"] as const;
+  for (const key of CHANGE_KEYS) {
+    const v = asi[key];
+    if (typeof v === "number" && Number.isFinite(v)) count += v;
   }
 
-  return count > 0 ? count : 1;
+  // No floor. An `asi` block with no change information means the count is *unknown*, which
+  // this dashboard spells `null`; reporting `1` invented a change that may not have happened,
+  // and the parser would then treat it as evidence of activity.
+  return count > 0 ? count : null;
 }
 
 /**
@@ -534,8 +536,14 @@ export function computeRowValues(
 
     const parentCounts = new Map<number, number>();
     let totalWithParent = 0;
+    // Index once instead of calling history.indexOf(r) inside the loop (O(n^2) on long runs).
+    const indexOfRun = new Map<number, number>();
+    for (let i = 0; i < history.length; i += 1) {
+      const h = history[i];
+      if (h !== undefined && !indexOfRun.has(h.run)) indexOfRun.set(h.run, i);
+    }
     for (const r of windowRuns) {
-      const rIdx = history.indexOf(r);
+      const rIdx = indexOfRun.get(r.run) ?? -1;
       const p =
         rIdx > 0 && history[rIdx - 1] && history[rIdx - 1]!.segment === r.segment
           ? history[rIdx - 1]!.run

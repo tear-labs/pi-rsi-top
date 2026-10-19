@@ -471,3 +471,33 @@ describe("repeated_failure_rate is per failed attempt", () => {
     assert.equal(rows.at(-1)!.values["repeated_failure_rate"], 0.5);
   });
 });
+
+describe("recorded_change_count does not invent changes", () => {
+  const ctx = { direction: "lower" as const, codeDistance: null, window: 12, minGain: 2 };
+  const mk = (asi: Record<string, unknown>): Run => ({
+    run: 1,
+    commit: "c1",
+    metric: 99,
+    metrics: {},
+    status: "keep",
+    description: "",
+    timestamp: 1_700_000_000_000,
+    segment: 0,
+    confidence: null,
+    asi,
+  });
+
+  test("a seed alone contributes nothing", () => {
+    // Summing every numeric asi field let `seed: 42` read as 42 changes.
+    assert.equal(computeRowValues([mk({ seed: 42 })], 0, ctx).recorded_change_count, null);
+  });
+
+  test("an explicit change count is used", () => {
+    assert.equal(computeRowValues([mk({ changes_made: 3 })], 0, ctx).recorded_change_count, 3);
+  });
+
+  test("no asi at all is null, not 1", () => {
+    const r = { ...mk({}), asi: undefined };
+    assert.equal(computeRowValues([r], 0, ctx).recorded_change_count, null);
+  });
+});
