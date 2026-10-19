@@ -138,7 +138,7 @@ run  seg   status  metric  cycles  valid_attempt  parent_gain  frontier_relative
 44     0     keep    1198    1198              1           0                    0  ...
 ```
 
-Metric families mirror the paper's table:
+The families mirror the paper's table (24 specs — the paper has 25; see the fidelity table):
 
 - **unary** — the trajectory on its own (`cycles`, `valid_attempt`, `recorded_change_count`).
 - **binary** — against one reference: its parent, the frontier, or its nearest earlier
@@ -152,6 +152,12 @@ Metric families mirror the paper's table:
 
 `null` means **not computable yet** (run 0 has no parent; a window of 1 has no spread) —
 never `0`, never `NaN`. Confusing "zero" with "unknown" is how a dashboard starts lying.
+
+The same rule holds one level down, in the log parser: a trajectory whose `metric` is missing
+or non-numeric parses as `NaN`, never `0`. On a lower-is-better metric a `0` is the best score
+ever recorded, so it would take the frontier and — because a frontier move resets the epoch
+clock — silently blind the stall monitor exactly when the evaluator starts failing. An
+unrecognized `status` resolves to `discard`, not `keep`.
 
 Run `rsi-top metrics` for the full list with definitions.
 
@@ -194,9 +200,16 @@ a stall, the cohort's arms are pushed apart in **three independent ways**:
    history differently, so they retrieve different trajectories and reach different
    conclusions.
 2. **Verbalized probabilities.** Each arm proposes a *portfolio of directions* with
-   probabilities, sampled **without replacement** and tail-sharpened — the rarer a
-   direction, the more mass it gets. Probabilities are strictly positive and sum to 1.
-   (Verbalized sampling, arXiv:2510.01171.)
+   probabilities, sampled **without replacement** and tail-sharpened with a per-arm draw,
+   so two arms given the same candidate list produce *different* portfolios. Directions are
+   ranked by draw order, so later draws carry a wider prior; the arm's own draw decides how
+   much of it it believes. (Verbalized sampling, arXiv:2510.01171.)
+
+   *Deviation:* the paper says these values "need not sum to 1, and they are not a calibrated
+   chance of success". They are normalized here so the steer percentages read sensibly — treat
+   them as relative emphasis, not a forecast. An earlier version derived the weight from draw
+   rank alone, which made every arm emit the identical vector; that is fixed, and
+   `test/direction.test.ts` asserts the vectors now differ.
 3. **Different lineage.** Each arm is grounded in a different **epoch** of frontier
    improvement, chosen by greedy farthest-point sampling over improvement epochs, and may
    **unfold** only a small, arm-specific set of trajectories.
@@ -207,24 +220,37 @@ byte-identical plan — `rsi-top intervene --json` twice is the same JSON.
 Sample steer (truncated):
 
 ```
-## RSI-top: frontier stalled — exploration collapse likely
+## RSI-top: frontier stalled — exploring that as possible exploration collapse
 
 Frontier 1198 (run 42) has not moved by >= 2 (lower is better) for 80 min of wall clock
-and 16 trajectories. Your recent proposals are probably narrowing onto one direction.
+and 16 trajectories.
 
-Do not keep refining the current idea. Below are 4 intervention arms, ...
+A stall is not proof of collapse — the run may be near its ceiling, or the metric may be
+noisy. It is a reason to diversify, not a diagnosis. One symptom would be proposals
+narrowing onto a single direction; if you can see that in your recent attempts, treat
+collapse as likely.
+
+Either way, do not keep refining the current idea. Below are 4 intervention arms, ...
 
 ### Arm 1/4
 - Dashboard view (15 metrics): parent_gain, within_one_recent_step_rate, ...
 - Lineage: run 45 (discard, metric 1198, abc013b) — ground your proposal in this
   trajectory's approach, not the frontier's.
-- Direction portfolio: reduce cycles 44% | raise recorded_change_count 22% | ...
+- Direction portfolio: reduce cycles 38% | raise recorded_change_count 24% | ...
 - Unfold only: run 45 (discard), run 42 (discard), run 39 (discard)
 ```
 
 Steer text is hard-capped at the host's 8 KB stdout budget. When a cohort does not fit, it
 drops whole arms and says so — it never emits a truncated sentence. The full plan is always
 written to `.auto/rsi/interventions.jsonl`.
+
+**Why the caveat is in the text, not just the docs.** The RSI-top paper says outright that
+"a stall alone does not establish that exploration has collapsed". A run can be flat because
+it is nearly solved, or because the evaluator is noisy. An earlier version of this package
+printed "exploration collapse likely" as a headline, which told the agent a fact nobody had
+verified. The steer now states the observation, offers collapse as the hypothesis worth
+acting on, and keeps the instruction to diversify either way — diversity costs one cohort,
+while wrongly stopping a search that was merely near its ceiling costs the run.
 
 ## CLI
 
@@ -256,7 +282,7 @@ Adapted, and why:
 
 | Paper | Here | Why |
 | --- | --- | --- |
-| 25 metrics, designed per task by an LLM and compiled to scripts before the run | 24 hand-written metric specs, fixed | A task-specific metric-design step needs an LLM call at `init` time; this package keeps the runtime dependency-free (Node stdlib only). The 23 cover all four families. |
+| 25 metrics, designed per task by an LLM and compiled to scripts before the run | 24 hand-written metric specs, fixed (3 unary / 7 binary / 10 region / 4 global) | A task-specific metric-design step needs an LLM call at `init` time; this package keeps the runtime dependency-free (Node stdlib only). All four families are covered, but two entries differ: the paper's `quality_conditioned_frontier_diversity` (region) is not implemented, and its `descendant_frontier_move_count` (global) is replaced by `frontier_improvement_count`, a run-prefix counter rather than a per-subtree count. The substitute is documented because it answers a different question. |
 | Code distance from the actual implementations | `src/code-distance.ts` computes similarity as `1 / (1 + lines changed)` from `git diff --numstat`, exactly 1 for identical trees, memoized; `null` outside a git work tree | It orders trajectories by edit distance, which is what the lineage spread needs. It is not calibrated to "percent of the repo", and a run without commits honestly reports `null` rather than `0`. Metrics stay pure — distance is injected. |
 | Interventions run proposals in parallel as their own trajectories | The steer text *asks* the agent to run one proposal per arm in parallel | The hook interface can steer, not fork. Parallel execution is the host's job (`pi-subagents` or similar). |
 | Stall monitor runs continuously | Evaluated on each `before.sh` call | The host offers no timer; a per-iteration check has the same semantics and no background process. |

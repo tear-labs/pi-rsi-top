@@ -18,7 +18,7 @@ published method description.
 - **Stall detection**: a monitor watches the frontier. A stall is e.g. "at least 20
   minutes in which the best score improves by fewer than 2 cycles".
 - **Intervention** on stall: pause native search, launch a **cohort** of agents, each
-  - receives a **different random subset of the dashboard metrics** (default **15 of 25**),
+  - receives a **different random subset of the dashboard metrics** (default **15 of 24**),
   - proposes a **portfolio of directions with verbalized probabilities**,
   - is grounded in a **different lineage** of the shared search history,
   - **unfolds** only the trajectories it decides to read,
@@ -54,7 +54,7 @@ bin/rsi-top.mjs          thin CLI entry (node >=22.6, runs TS directly)
 src/types.ts             ALL shared types + DEFAULT_RSI_CONFIG   [OWNER: parent, frozen]
 src/autoresearch.ts      parse .auto/log.jsonl -> Run[] + SessionSnapshot  [lane D]
 src/paths.ts             .auto/rsi/* path helpers + atomic JSONL append   [lane D]
-src/metrics.ts           metric registry (23 specs) + per-row compute      [lane A]
+src/metrics.ts           metric registry (24 specs) + per-row compute      [lane A]
 src/dashboard.ts         score trajectories -> DashboardRow, read/write dashboard.jsonl [lane A]
 src/frontier.ts          best-so-far series, meaningful-improvement steps, epochs [lane B]
 src/stall.ts             StallConfig -> StallState (stall detection)       [lane B]
@@ -115,7 +115,7 @@ export function handleBefore(payload: BeforeHookPayload, workDir: string): strin
 export function handleAfter(payload: AfterHookPayload, workDir: string): string;
 ```
 
-## Metric set (23, adapted from the paper's table of 25)
+## Metric set (24, adapted from the paper's table of 25)
 
 Kind `unary`: `cycles` (primary metric), `valid_attempt`, `recorded_change_count`.
 Kind `binary`: `parent_gain`, `frontier_relative_gap`, `parent_code_distance`,
