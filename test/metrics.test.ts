@@ -408,7 +408,7 @@ describe("window_frontier_conversion_rate counts real advances", () => {
       segment: 0,
       confidence: null,
     }));
-    return buildRows(runs, session(), { windowSize: metrics.length, minGain: 2 });
+    return buildRows(runs, session(), { window: metrics.length, minGain: 2 });
   }
 
   test("is 0 for a window where nothing advanced the frontier", () => {
@@ -467,7 +467,7 @@ describe("repeated_failure_rate is per failed attempt", () => {
       best_metric: null,
       run_count: 0,
     };
-    const rows = buildRows(runs, session, { windowSize: 8, minGain: 2 });
+    const rows = buildRows(runs, session, { window: 8, minGain: 2 });
     assert.equal(rows.at(-1)!.values["repeated_failure_rate"], 0.5);
   });
 });
