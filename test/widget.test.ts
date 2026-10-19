@@ -225,3 +225,61 @@ describe("renderWidget", () => {
     assert.match(lines[0], /rsi-top/);
   });
 });
+
+describe("invalid trajectories", () => {
+  // Real case from a live log: run 5 crashed and pi-autoresearch recorded `metric: 0`.
+  // On a lower-is-better metric that is indistinguishable from a perfect result, so it
+  // must be excluded from the sparkline and never printed as if it were measured.
+  const crashed: Run = {
+    run: 5,
+    commit: "HEAD",
+    metric: 0,
+    metrics: {},
+    status: "crash",
+    description: "CRASH: joint whole-block local search",
+    timestamp: 1_700_000_300_000,
+    segment: 0,
+    confidence: null,
+  };
+
+  it("does not plot a crash's placeholder metric", () => {
+    const runs = [run(4, 6.881), crashed, run(6, 5.934)];
+    const spark = sparkline(runs, "lower");
+    assert.equal(spark.length, 2, "crash row should be dropped, not plotted");
+  });
+
+  it("does not let a crash's 0 flatten the scale", () => {
+    const runs = [run(4, 6.881), crashed, run(6, 5.934)];
+    const spark = sparkline(runs, "lower");
+    // With the 0 included, 6.881 would be the floor and 5.934 the ceiling. Excluding it
+    // keeps the orientation right: 6.881 is worse than 5.934 for a lower-is-better metric.
+    assert.equal(spark[0], "▁");
+    assert.equal(spark[1], "█");
+  });
+
+  it("prints an em dash instead of 0 for a crash's metric", () => {
+    const lines = renderWidget({
+      runs: [crashed],
+      session: session(),
+      stall: stall(),
+      rows: [],
+      tableRows: 1,
+    });
+    const row = lines.find((l) => l.includes("crash"));
+    assert.ok(row, "expected the crash row");
+    assert.match(row, /—/);
+    assert.ok(!/\b0\b/.test(row.replace(/crash/, "")), `crash metric rendered as a number: ${row}`);
+  });
+
+  it("counts only plottable runs in the span note", () => {
+    const runs = [run(4, 6.881), crashed, run(6, 5.934)];
+    const lines = renderWidget({ runs, session: session(), stall: stall(), rows: [] });
+    assert.match(lines.join("\n"), /last 2/);
+  });
+
+  it("treats checks_failed the same as crash", () => {
+    const failed: Run = { ...crashed, run: 7, status: "checks_failed" };
+    const runs = [run(6, 5.934), failed];
+    assert.equal(sparkline(runs, "lower").length, 1);
+  });
+});

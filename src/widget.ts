@@ -64,18 +64,29 @@ function clip(line: string, max = MAX_LINE): string {
 }
 
 /**
+ * A run whose metric is meaningful. Crash and `checks_failed` rows carry a placeholder metric
+ * (often `0`), which on a lower-is-better metric looks like the single best point ever
+ * recorded. Mirror `frontier.ts`'s rule so the sparkline cannot disagree with the frontier.
+ */
+function isPlottable(r: Run): boolean {
+  return r.status !== "crash" && r.status !== "checks_failed" && Number.isFinite(r.metric);
+}
+
+/**
  * Map the trailing `span` metric values onto block glyphs.
  *
  * The scale is the *window's* min/max rather than the session's, deliberately: a search
  * that is improving looks like it is improving, and a search that is flat for the whole
  * window looks flat even if the absolute numbers are large. A flat window renders as a
  * row of identical blocks, which is the signal we want the eye to catch.
+ *
+ * Invalid trajectories are dropped rather than plotted at their placeholder value.
  */
 export function sparkline(runs: Run[], direction: "lower" | "higher", span = 24): string {
   const values = runs
     .slice(-span)
-    .map((r) => r.metric)
-    .filter((v) => Number.isFinite(v));
+    .filter(isPlottable)
+    .map((r) => r.metric);
   if (values.length === 0) return "";
 
   const lo = Math.min(...values);
@@ -120,11 +131,14 @@ function tableLines(input: WidgetInput, limit: number): string[] {
   // Without a scored dashboard, fall back to the raw log so the widget is still useful
   // before `rsi-top init` has ever scored a trajectory.
   if (rows.length === 0) {
-    return input.runs
-      .slice(-limit)
-      .map((r) =>
-        clip(`  ${String(r.run).padStart(3)} ${r.status.padEnd(12)} ${fmt(r.metric).padStart(9)}`),
-      );
+    return input.runs.slice(-limit).map((r) =>
+      clip(
+        `  ${String(r.run).padStart(3)} ${String(r.status).padEnd(12)} ` +
+          // A crash's metric is a placeholder, not a measurement; printing `0` invites the
+          // reader to compare it against real results.
+          `${(isPlottable(r) ? fmt(r.metric) : "—").padStart(9)}`,
+      ),
+    );
   }
 
   const frontierRun = input.stall.frontierRun;
@@ -154,7 +168,8 @@ export function renderWidget(input: WidgetInput): string[] {
   const tableRows = input.tableRows ?? 0;
 
   const spark = sparkline(input.runs, input.session.direction, span);
-  const spanNote = spark ? `last ${Math.min(span, input.runs.length)}` : "";
+  const plotted = input.runs.slice(-span).filter(isPlottable).length;
+  const spanNote = spark ? `last ${plotted}` : "";
   const scale = spark ? `${spanNote} ▸ ${spark}` : "";
 
   const lines: string[] = [statusLine(input)];
