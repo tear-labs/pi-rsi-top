@@ -1,8 +1,9 @@
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { computeRowValues, metricSpecs } from "../src/metrics.ts";
-import type { CodeDistance, MetricKind, Run } from "../src/types.ts";
+import { buildRows } from "../src/dashboard.ts";
+import type { CodeDistance, DashboardRow, MetricKind, Run, SessionSnapshot } from "../src/types.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -382,4 +383,91 @@ test("segments reset parentage and the segment root", () => {
   assert.equal(computeRowValues(history, 3)["parent_gain"], 20);
   // improvements span segments; the frontier is global
   assert.ok(computeRowValues(history, 3)["frontier_relative_gap"] !== null);
+});
+describe("window_frontier_conversion_rate counts real advances", () => {
+  const session = (): SessionSnapshot => ({
+    name: "t",
+    goal: "",
+    metric_name: "nll",
+    metric_unit: "",
+    direction: "lower",
+    baseline_metric: null,
+    best_metric: null,
+    run_count: 0,
+  });
+
+  function rowsFor(metrics: number[]): DashboardRow[] {
+    const runs: Run[] = metrics.map((v, i) => ({
+      run: i + 1,
+      commit: `c${i + 1}`,
+      metric: v,
+      metrics: {},
+      status: "keep",
+      description: "",
+      timestamp: 1_700_000_000_000 + i * 60_000,
+      segment: 0,
+      confidence: null,
+    }));
+    return buildRows(runs, session(), { windowSize: metrics.length, minGain: 2 });
+  }
+
+  test("is 0 for a window where nothing advanced the frontier", () => {
+    // All identical: every run is 'keep', but none moved the best value. The old
+    // implementation returned 1.0 here.
+    const rows = rowsFor([100, 100, 100, 100]);
+    assert.equal(rows.at(-1)!.values["window_frontier_conversion_rate"], 0);
+  });
+
+  test("counts only runs that cleared the minimum gain", () => {
+    // 100 -> 99 (gain 1, below minGain 2: not an advance) -> 95 (gain 5) -> 90 (gain 5)
+    // The first run establishes the frontier and must not count.
+    const rows = rowsFor([100, 99, 95, 90]);
+    assert.equal(rows.at(-1)!.values["window_frontier_conversion_rate"], 2 / 4);
+  });
+
+  test("agrees with window_frontier_gain about whether anything happened", () => {
+    const flat = rowsFor([42, 42, 42]).at(-1)!;
+    assert.equal(flat.values["window_frontier_gain"], null);
+    assert.equal(flat.values["window_frontier_conversion_rate"], 0);
+  });
+});
+
+describe("repeated_failure_rate is per failed attempt", () => {
+  test("does not shrink as a window fills with successes", () => {
+    const mk = (i: number, status: Run["status"], desc: string): Run => ({
+      run: i,
+      commit: `c${i}`,
+      metric: 10,
+      metrics: {},
+      status,
+      description: desc,
+      timestamp: 1_700_000_000_000 + i * 60_000,
+      segment: 0,
+      confidence: null,
+    });
+    // Two identical failures, six successes. Paper: 1 of 2 failed attempts repeats -> 0.5.
+    // Dividing by window size would give 1/8.
+    const runs = [
+      mk(1, "checks_failed", "boom"),
+      mk(2, "checks_failed", "boom"),
+      mk(3, "keep", "ok"),
+      mk(4, "keep", "ok"),
+      mk(5, "keep", "ok"),
+      mk(6, "keep", "ok"),
+      mk(7, "keep", "ok"),
+      mk(8, "keep", "ok"),
+    ];
+    const session: SessionSnapshot = {
+      name: "t",
+      goal: "",
+      metric_name: "nll",
+      metric_unit: "",
+      direction: "lower",
+      baseline_metric: null,
+      best_metric: null,
+      run_count: 0,
+    };
+    const rows = buildRows(runs, session, { windowSize: 8, minGain: 2 });
+    assert.equal(rows.at(-1)!.values["repeated_failure_rate"], 0.5);
+  });
 });

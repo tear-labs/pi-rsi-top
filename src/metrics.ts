@@ -12,6 +12,10 @@ import type {
   MetricSpec,
   Run,
 } from "./types.ts";
+// frontier.ts imports only types, so this is not a cycle. Using its definition of a
+// "meaningful improvement" is deliberate: when the dashboard had its own, the row and the
+// stall monitor could disagree about whether the same run had stalled.
+import { improvementSteps } from "./frontier.ts";
 
 /** Default context values when optional context properties are omitted. */
 const DEFAULT_DIRECTION: Direction = "lower";
@@ -603,8 +607,24 @@ export function computeRowValues(
       values["window_redundancy_rate"] = redundantCount / windowRuns.length;
     }
 
-    const keptCount = windowRuns.filter((r) => r.status === "keep").length;
-    values["window_frontier_conversion_rate"] = keptCount / windowRuns.length;
+    // "Advanced the frontier" means the trajectory actually moved the best value, not merely
+    // that it was kept. A run can be kept for being acceptable while landing well short of
+    // the frontier — counting those reported conversion on a window whose frontier gain was
+    // exactly zero, i.e. a dashboard row claiming progress that did not happen.
+    // `improvementSteps` seeds each segment with its first valid run — that run *establishes*
+    // the frontier rather than advancing it, so it must not count as a conversion.
+    const steps = improvementSteps(segmentRunsUpToCurrent, direction, minGain);
+    const seenSegment = new Set<number>();
+    const advancing = new Set<number>();
+    for (const step of steps) {
+      if (!seenSegment.has(step.segment)) {
+        seenSegment.add(step.segment);
+        continue;
+      }
+      advancing.add(step.run);
+    }
+    const convertedCount = windowRuns.filter((r) => advancing.has(r.run)).length;
+    values["window_frontier_conversion_rate"] = convertedCount / windowRuns.length;
 
     if (validInWindow.length >= 2 && currentFrontierMetric !== null) {
       const withinCount = validInWindow.filter(
@@ -646,7 +666,11 @@ export function computeRowValues(
         if (count > maxCount) maxCount = count;
       }
       values["dominant_failure_signature_mass"] = maxCount / failedRuns.length;
-      values["repeated_failure_rate"] = repeatedCount / windowRuns.length;
+      // Against failed runs, not the whole window: the paper defines this as the fraction of
+      // *failed attempts* that repeat an earlier signature. Dividing by window size made the
+      // number shrink as a window filled with successes, which is not what it measures.
+      values["repeated_failure_rate"] =
+        failedRuns.length > 0 ? repeatedCount / failedRuns.length : 0;
     }
   }
 
