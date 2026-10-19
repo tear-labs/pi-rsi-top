@@ -46,3 +46,38 @@ describe("cli help", () => {
     assert.throws(() => run(["definitely-not-a-command"]));
   });
 });
+
+describe("the hook fails open", () => {
+  function hook(payload: string): { code: number; stderr: string } {
+    try {
+      const stderr = execFileSync(process.execPath, [BIN, "hook", "before"], {
+        input: payload,
+        encoding: "utf8",
+        cwd: "/tmp",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return { code: 0, stderr };
+    } catch (err) {
+      const e = err as { status?: number; stderr?: string };
+      return { code: e.status ?? 1, stderr: e.stderr ?? "" };
+    }
+  }
+
+  it("exits 0 on an unknown event", () => {
+    // Throwing here would make the host report the *search* as broken.
+    const r = hook(JSON.stringify({ event: "sideways" }));
+    assert.equal(r.code, 0);
+  });
+
+  it("exits 0 on an unparseable payload", () => {
+    assert.equal(hook("{not json").code, 0);
+  });
+
+  it("exits 0 on an empty payload", () => {
+    assert.equal(hook("").code, 0);
+  });
+
+  it("exits 0 on a JSON array", () => {
+    assert.equal(hook(JSON.stringify([1, 2, 3])).code, 0);
+  });
+});

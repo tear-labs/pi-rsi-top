@@ -342,7 +342,17 @@ async function cmdHook(event: string, workDir: string): Promise<number> {
   }
   const { handleHook } = await import("./hook.ts");
   const payload = parsed as Record<string, unknown>;
-  const out = handleHook({ ...payload, event: payload["event"] ?? event }, workDir);
+  // Fail-open, as documented: a hook must never be able to fail the run it is attached to.
+  // `handleHook` throws on a payload that is not an object or carries an unknown event, and
+  // an uncaught throw here would exit non-zero with an error on stderr — which the host
+  // surfaces as if the *search* had broken.
+  let out: string;
+  try {
+    out = handleHook({ ...payload, event: payload["event"] ?? event }, workDir);
+  } catch (err) {
+    process.stderr.write(`rsi-top hook: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 0;
+  }
   if (out !== "") process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
   return 0;
 }
