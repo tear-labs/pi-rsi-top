@@ -13,7 +13,11 @@
  */
 
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import process from "node:process";
 
 import { loadConfig } from "./hook.ts";
@@ -25,6 +29,7 @@ import { buildRows, readRows, scoreAndAppend } from "./dashboard.ts";
 import { metricSpecs } from "./metrics.ts";
 import { dashboardPath } from "./paths.ts";
 import { installHooks } from "./cli.ts";
+import { renderWidget } from "./widget.ts";
 
 /** The work dir the tools operate on. An explicit argument wins over the process cwd. */
 function resolveWorkDir(explicit?: string): string {
@@ -154,6 +159,57 @@ const interveneTool = defineTool({
   },
 });
 
+/** Widget key. One key, so a second refresh replaces rather than stacks. */
+const WIDGET_KEY = "rsi-top";
+
+/**
+ * The one widget config knob that is worth an environment variable rather than a file:
+ * how much of the screen the glance costs. `0` hides it entirely, which is what someone
+ * who only wants the hooks should use.
+ */
+const WIDGET_TABLE_ROWS = (() => {
+  const raw = process.env["RSI_TOP_WIDGET_ROWS"];
+  if (raw === undefined) return 3;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 3;
+})();
+
+/**
+ * Recompute and repaint the widget, or clear it when there is nothing to show.
+ *
+ * Fail-open like everything else here: a widget must never be able to break a session, so
+ * any error clears the widget instead of surfacing. Reads are cheap (a JSONL scan plus the
+ * scored dashboard), but they still run only on events, never per frame.
+ */
+function refreshWidget(ctx: Pick<ExtensionContext, "ui">): void {
+  try {
+    if (WIDGET_TABLE_ROWS === 0 && process.env["RSI_TOP_WIDGET"] === "0") {
+      ctx.ui.setWidget(WIDGET_KEY, undefined);
+      return;
+    }
+    const workDir = process.cwd();
+    const cfg = loadConfig(workDir);
+    const { runs, session } = readSession(workDir);
+    if (runs.length === 0) {
+      ctx.ui.setWidget(WIDGET_KEY, undefined);
+      return;
+    }
+    const stall = detectStall(runs, session, cfg.stall);
+    const rows = readRows(dashboardPath(workDir, cfg.stateDir));
+    ctx.ui.setWidget(
+      WIDGET_KEY,
+      renderWidget({ runs, session, stall, rows, tableRows: WIDGET_TABLE_ROWS }),
+      { placement: "belowEditor" },
+    );
+  } catch {
+    try {
+      ctx.ui.setWidget(WIDGET_KEY, undefined);
+    } catch {
+      // Nothing left to do; the session must survive a widget failure.
+    }
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool(checkTool);
   pi.registerTool(dashboardTool);
@@ -200,6 +256,7 @@ export default function (pi: ExtensionAPI) {
   // Surface a stall at startup so it is visible without asking. Never throws: an extension
   // must not break a session, and the hooks fail open for the same reason.
   pi.on("session_start", async (_event, ctx) => {
+    refreshWidget(ctx);
     try {
       const workDir = process.cwd();
       const cfg = loadConfig(workDir);
@@ -216,5 +273,15 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // Fail open, exactly like the hooks.
     }
+  });
+
+  // Repaint after anything that can change the log. `tool_result` covers the case that
+  // actually matters — `log_experiment` appending a trajectory — while `turn_end` catches
+  // changes made by plain bash (a hook run, a hand-edited JSONL, a reverted commit).
+  pi.on("tool_result", async (_event, ctx) => {
+    refreshWidget(ctx);
+  });
+  pi.on("turn_end", async (_event, ctx) => {
+    refreshWidget(ctx);
   });
 }
