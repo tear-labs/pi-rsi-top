@@ -72,6 +72,9 @@ function describeRow(row: DashboardRow, metrics: string[]): string {
 }
 
 function formatNumber(v: number): string {
+  // The one formatter that had no guard: a run with no reported metric reached the steer
+  // text as the literal string "NaN" (via `pickUnfold`, which selects by status alone).
+  if (!Number.isFinite(v)) return "—";
   if (Number.isInteger(v)) return String(v);
   const abs = Math.abs(v);
   if (abs >= 1000) return v.toFixed(0);
@@ -103,7 +106,14 @@ export function buildCohortPlan(
   const metrics = opts?.metrics ?? metricSpecs();
   if (metrics.length === 0) throw new Error("buildCohortPlan: metric set is empty");
   const metricNames = metrics.map((m) => m.name);
-  const epoch = opts?.epoch ?? (stall.frontierRun === null ? 0 : improvementSteps(runs, session.direction).length);
+  // Use the configured minGain, not the default of 0: the plan's epoch is reported next to
+  // the stall that triggered it, and counting every positive gain as a new epoch made the
+  // two disagree about which improvement was the last meaningful one.
+  const epoch =
+    opts?.epoch ??
+    (stall.frontierRun === null
+      ? 0
+      : improvementSteps(runs, session.direction, cfg.stall.minGain).length);
   const seed = pickSeed(cfg, runs, session, epoch, opts);
   const rng = makeRng(seed);
 

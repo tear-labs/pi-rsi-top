@@ -89,11 +89,11 @@ export function verbalizedSample(
   // does not do that: it depends only on draw position, so every arm emits the identical
   // vector and the axis contributes no diversity at all.
   //
-  // What varies here is evidence about the direction itself. Each arm draws its own
-  // `raritySeed` sample of the direction space and scores directions by how far the lucky
-  // draw falls from the "obvious" head, then sharpens with temperature. Two arms given the
-  // same candidate list therefore produce different portfolios, which is the property the
-  // method needs.
+  // What varies is the arm's own draw. Direction i in the draw order gets a rank prior of
+  // 1/(i+1), and a uniform draw jitters that prior by up to +/-45%. Two arms given the same
+  // candidate list therefore produce different portfolios, which is the property the method
+  // needs. It is a jittered rank prior, not a model of evidence — the arms do not see
+  // anything about the direction before pricing it.
   //
   // Note the paper also says these values need not sum to 1 and are not calibrated
   // probabilities of success. We keep them normalized only so the steer percentages read

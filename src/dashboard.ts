@@ -113,7 +113,10 @@ export function readRows(dashboardPath: string): DashboardRow[] {
         typeof record["run"] !== "number" ||
         typeof record["segment"] !== "number" ||
         typeof record["commit"] !== "string" ||
-        typeof record["metric"] !== "number" ||
+        // `NaN` is the *intended* representation of "the evaluator reported no number", and
+        // JSON has no NaN — `JSON.stringify` writes it as `null`. Accepting null here keeps
+        // such a row readable, so it is not re-appended on every hook call forever.
+        (record["metric"] !== null && typeof record["metric"] !== "number") ||
         !isRunStatus(record["status"]) ||
         typeof record["timestamp"] !== "number" ||
         (record["parent"] !== null && typeof record["parent"] !== "number") ||
@@ -126,7 +129,7 @@ export function readRows(dashboardPath: string): DashboardRow[] {
         run: record["run"],
         segment: record["segment"],
         commit: record["commit"],
-        metric: record["metric"],
+        metric: record["metric"] === null ? Number.NaN : record["metric"],
         status: record["status"],
         timestamp: record["timestamp"],
         parent: record["parent"],

@@ -70,7 +70,9 @@ function metricMapFrom(value: unknown): Record<string, number> {
  * it the *best possible* result on a lower-is-better metric: it would win the frontier and,
  * because winning resets the epoch clock, silently blind the stall monitor.
  *
- * Every formatter in the package renders `NaN` as an em dash.
+ * Formatters render `NaN` as an em dash (`cli.ts`, `widget.ts`, `extension.ts`, and
+ * `intervene.ts`'s steer text). `dashboard.jsonl` stores it as JSON `null`, which `readRows`
+ * maps back to `NaN`.
  */
 function metricFrom(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
@@ -153,19 +155,25 @@ function currentSegmentRuns(runs: Run[], segment: number): Run[] {
   return runs.filter((run) => run.segment === segment);
 }
 
-/** Baseline: first kept run of the current segment, else the segment's first run. */
+/**
+ * Baseline: first kept run of the current segment, else the segment's first run.
+ *
+ * Skips runs with no usable metric. A single `NaN` here would poison the whole aggregate
+ * (`Math.min(...)` returns NaN), and the session snapshot is serialized to JSON where NaN
+ * becomes `null` — the host would then be told there is no baseline at all.
+ */
 function baselineMetric(runs: Run[], segment: number): number | null {
   const current = currentSegmentRuns(runs, segment);
-  const firstKept = current.find((run) => run.status === "keep");
+  const firstKept = current.find((run) => run.status === "keep" && Number.isFinite(run.metric));
   if (firstKept !== undefined) return firstKept.metric;
-  const first = current[0];
+  const first = current.find((run) => Number.isFinite(run.metric));
   return first !== undefined ? first.metric : null;
 }
 
 /** Best: optimal metric across kept runs of the current segment only. */
 function bestMetric(runs: Run[], segment: number, direction: Direction): number | null {
   const kept = currentSegmentRuns(runs, segment)
-    .filter((run) => run.status === "keep")
+    .filter((run) => run.status === "keep" && Number.isFinite(run.metric))
     .map((run) => run.metric);
   if (kept.length === 0) return null;
   return direction === "lower" ? Math.min(...kept) : Math.max(...kept);
