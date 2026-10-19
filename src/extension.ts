@@ -182,8 +182,8 @@ export default function (pi: ExtensionAPI) {
 
       if (sub === "intervene") {
         const plan = buildCohortPlan(runs, session, state, cfg, {
-      codeDistance: codeDistanceFor(workDir),
-    });
+          codeDistance: codeDistanceFor(workDir),
+        });
         pi.sendUserMessage(renderSteer(plan, runs, session, state, cfg));
         return;
       }
