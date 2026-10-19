@@ -164,8 +164,8 @@ const WIDGET_KEY = "rsi-top";
 
 /**
  * The one widget config knob that is worth an environment variable rather than a file:
- * how much of the screen the glance costs. `0` hides it entirely, which is what someone
- * who only wants the hooks should use.
+ * how much of the screen the glance costs. `RSI_TOP_WIDGET_ROWS=0` keeps the status line
+ * and drops the trajectory table; `RSI_TOP_WIDGET=0` hides the widget entirely.
  */
 const WIDGET_TABLE_ROWS = (() => {
   const raw = process.env["RSI_TOP_WIDGET_ROWS"];
@@ -173,6 +173,9 @@ const WIDGET_TABLE_ROWS = (() => {
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n >= 0 ? n : 3;
 })();
+
+/** Runtime visibility, toggled by `/rsi-top hide` and `/rsi-top show` for this session. */
+let widgetVisible = process.env["RSI_TOP_WIDGET"] !== "0";
 
 /**
  * Recompute and repaint the widget, or clear it when there is nothing to show.
@@ -183,7 +186,7 @@ const WIDGET_TABLE_ROWS = (() => {
  */
 function refreshWidget(ctx: Pick<ExtensionContext, "ui">): void {
   try {
-    if (WIDGET_TABLE_ROWS === 0 && process.env["RSI_TOP_WIDGET"] === "0") {
+    if (!widgetVisible) {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
       return;
     }
@@ -216,10 +219,18 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(interveneTool);
 
   pi.registerCommand("rsi-top", {
-    description: "RSI-top: `init` install hooks, `check` show the stall state, `intervene` emit a cohort",
+    description:
+      "RSI-top: `init` install hooks, `check` stall state, `intervene` emit a cohort, `show`/`hide` the widget",
     handler: async (args, ctx) => {
       const sub = (args ?? "").trim().split(/\s+/)[0] || "check";
       const workDir = process.cwd();
+
+      if (sub === "hide" || sub === "show") {
+        widgetVisible = sub === "show";
+        refreshWidget(ctx);
+        ctx.ui.notify(`rsi-top: widget ${widgetVisible ? "shown" : "hidden"}`, "info");
+        return;
+      }
 
       if (sub === "init") {
         const writes = installHooks(workDir, { force: false });

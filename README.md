@@ -81,6 +81,51 @@ Two properties worth calling out, because they are what make it safe to install:
 - **Fail-open.** A corrupt log, a missing file, or a bad payload yields no steer text and a
   zero exit code. It never fails the run it is attached to.
 
+## The widget: the glance, always on screen
+
+A dashboard you have to ask for is a dashboard nobody reads. When a run stalls, the
+symptom is precisely that *it looks like it is working* — results keep landing, nothing
+asks for help. So `pi-rsi-top` pins a bottom widget under the editor:
+
+```
+rsi-top │ cycles 1198 (run 42) │ STALLED 20m / 4 runs │ 46 runs, 29 keep │ epoch 4
+last 24 ▸ ▁▂▃▄▅▅▆▇▇▇▇▇▇███████████
+   40 keep              1199  ← 39         0
+   41 keep              1199  ← 40         0
+◆  42 discard           1198  ← 41         1
+   43 keep              1198  ← 42         0
+⚠ stall — /rsi-top intervene (or `pi-rsi-top intervene`) for a cohort
+```
+
+Three things make it worth the vertical space:
+
+- **The sparkline inverts for `lower`-is-better metrics.** Glyph height always means
+  *better*, never *numerically larger*, so cycles and val_bpb read the same way as
+  accuracy. A flat window collapses to a row of identical blocks — which is the whole
+  signal, visible without reading a number.
+- **`◆` marks the run that set the frontier**, not every row sitting at the frontier
+  value. After a 20-minute stall the last four rows are usually *all* equal to the best
+  metric; flagging them all would say nothing about which trajectory got there first.
+- **It repaints on `tool_result` and `turn_end`**, so it updates when `log_experiment`
+  appends a trajectory and also when plain bash changes the log.
+
+Rendered as a `string[]` rather than a component factory on purpose: factories are
+**ignored in RPC mode**, which is how Pi Web drives the UI. A factory widget would be
+invisible in the browser. This way the same renderer appears in the terminal and in
+[Pi Web](https://github.com/agegr/pi-web).
+
+```
+/rsi-top hide             # this session only
+/rsi-top show             # back on
+```
+
+Or from the environment, before launching pi:
+
+```
+RSI_TOP_WIDGET=0          # hide it everywhere
+RSI_TOP_WIDGET_ROWS=0     # keep the status line, drop the trajectory table
+```
+
 ## The dashboard
 
 One row per trajectory, 24 metrics, written as newline-delimited JSON to
