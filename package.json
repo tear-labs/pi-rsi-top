@@ -2,15 +2,38 @@
   "name": "pi-rsi-top",
   "version": "0.1.0",
   "description": "RSI-top for pi-autoresearch: a per-trajectory metric dashboard, frontier stall detection, and diversity-controlled intervention cohorts that escape exploration collapse.",
-  "keywords": ["pi-package", "autoresearch", "rsi-top", "exploration-collapse", "dashboard"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "autoresearch",
+    "rsi-top",
+    "recursive-self-improvement",
+    "exploration-collapse",
+    "dashboard",
+    "optimization",
+    "coding-agent"
+  ],
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.6" },
-  "bin": { "rsi-top": "./bin/rsi-top.mjs" },
-  "pi": {
-    "extensions": ["./src/extension.ts"]
+  "engines": {
+    "node": ">=22.6"
   },
-  "files": ["bin", "src", "hooks", "README.md", "SPEC.md", "LICENSE"],
+  "bin": {
+    "rsi-top": "./bin/rsi-top.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
+  "files": [
+    "bin",
+    "src",
+    "hooks",
+    "README.md",
+    "SPEC.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
@@ -22,5 +45,14 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
+  },
+  "author": "Tear Labs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tear-labs/pi-rsi-top.git"
+  },
+  "homepage": "https://github.com/tear-labs/pi-rsi-top#readme",
+  "bugs": {
+    "url": "https://github.com/tear-labs/pi-rsi-top/issues"
   }
 }

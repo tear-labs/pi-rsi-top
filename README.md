@@ -42,13 +42,16 @@ This package gives a `pi-autoresearch` run that dashboard.
 ## Install
 
 ```bash
-pi install npm:pi-rsi-top        # or: pi install git:github.com/<you>/pi-rsi-top
+pi install git:github.com/tear-labs/pi-rsi-top
 ```
 
-Or, without installing, point pi at the extension once:
+That's it — one command, no npm publish, no build step. Pi clones the repo, installs
+the extension, and adds it to `~/.pi/agent/settings.json`.
+
+To try it for a single session without saving it:
 
 ```bash
-pi -e ./pi-rsi-top/src/extension.ts
+pi -e git:github.com/tear-labs/pi-rsi-top
 ```
 
 Then wire the hooks into a work dir:
