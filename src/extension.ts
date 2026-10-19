@@ -178,13 +178,38 @@ const WIDGET_TABLE_ROWS = (() => {
 let widgetVisible = process.env["RSI_TOP_WIDGET"] !== "0";
 
 /**
+ * Pi Web renders an extension widget as a fixed 108px trigger in a row, and only expands the
+ * panel for a widget whose line count is `> 1 && <= 3` (see pi-web's widget component: it
+ * picks its initial open panel with `lines.length > 1 && lines.length <= 3`). Anything taller
+ * is a collapsed, unopenable tab. So the *same* widget has to be a different shape depending
+ * on where it is being drawn.
+ */
+const WEB_MAX_LINES = 3;
+
+/**
+ * Collapse the full widget into something Pi Web can actually show.
+ *
+ * The status line is the part that must survive; the sparkline is the second-most
+ * informative. The per-trajectory table is what gets dropped, because it is the only part
+ * that needs more than three lines to say anything.
+ */
+export function compact(lines: string[], max = WEB_MAX_LINES): string[] {
+  const [status, spark] = lines;
+  const head = [status, spark].filter((l): l is string => l !== undefined);
+  // A stall warning is the one line worth more than the table; put it in the third slot.
+  const warn = lines.find((l) => l.startsWith("⚠"));
+  if (warn && head.length < max) head.push(warn);
+  return head.slice(0, max);
+}
+
+/**
  * Recompute and repaint the widget, or clear it when there is nothing to show.
  *
  * Fail-open like everything else here: a widget must never be able to break a session, so
  * any error clears the widget instead of surfacing. Reads are cheap (a JSONL scan plus the
  * scored dashboard), but they still run only on events, never per frame.
  */
-function refreshWidget(ctx: Pick<ExtensionContext, "ui">): void {
+function refreshWidget(ctx: Pick<ExtensionContext, "ui" | "mode">): void {
   try {
     if (!widgetVisible) {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
@@ -199,11 +224,10 @@ function refreshWidget(ctx: Pick<ExtensionContext, "ui">): void {
     }
     const stall = detectStall(runs, session, cfg.stall);
     const rows = readRows(dashboardPath(workDir, cfg.stateDir));
-    ctx.ui.setWidget(
-      WIDGET_KEY,
-      renderWidget({ runs, session, stall, rows, tableRows: WIDGET_TABLE_ROWS }),
-      { placement: "belowEditor" },
-    );
+    const full = renderWidget({ runs, session, stall, rows, tableRows: WIDGET_TABLE_ROWS });
+    // Web gets the compact form (see WEB_MAX_LINES); the TUI has room for the table.
+    const lines = ctx.mode === "rpc" ? compact(full) : full;
+    ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
   } catch {
     try {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
