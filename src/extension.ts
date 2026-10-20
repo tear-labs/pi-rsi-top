@@ -178,6 +178,31 @@ const WIDGET_TABLE_ROWS = (() => {
 let widgetVisible = process.env["RSI_TOP_WIDGET"] !== "0";
 
 /**
+ * Where the widget reads from, when that is not the process cwd.
+ *
+ * Pi is usually opened in the chat's working directory, which is often NOT the directory an
+ * autoresearch run lives in. Without this, the widget is empty in every session that is not
+ * started inside the run itself — and `/rsi-top show` still claimed it was shown. Set by
+ * `/rsi-top show <dir>` or `RSI_TOP_CWD`.
+ */
+let widgetWorkDir: string | undefined = process.env["RSI_TOP_CWD"];
+
+/**
+ * Reset the session-scoped widget state (visibility and work dir) to its env-derived default.
+ *
+ * Only for tests: these two variables are module state on purpose (they must outlive a single
+ * extension event), which means otherwise one test's `hide` silently changes the next test's
+ * starting point. Exported rather than reached into, so the reset stays in sync with the state.
+ */
+export function resetWidgetState(): void {
+  widgetVisible = process.env["RSI_TOP_WIDGET"] !== "0";
+  widgetWorkDir = process.env["RSI_TOP_CWD"];
+}
+
+/** Why the widget has nothing to draw. Returned so `show` can tell the truth. */
+type WidgetOutcome = { shown: true; lines: number } | { shown: false; reason: string };
+
+/**
  * Pi Web renders an extension widget as a fixed 108px trigger in a row, and only expands the
  * panel for a widget whose line count is `> 1 && <= 3` (see pi-web's widget component: it
  * picks its initial open panel with `lines.length > 1 && lines.length <= 3`). Anything taller
@@ -213,18 +238,21 @@ export function compact(lines: string[], max = WEB_MAX_LINES): string[] {
  * any error clears the widget instead of surfacing. Reads are cheap (a JSONL scan plus the
  * scored dashboard), but they still run only on events, never per frame.
  */
-function refreshWidget(ctx: Pick<ExtensionContext, "ui" | "mode">): void {
+function refreshWidget(ctx: Pick<ExtensionContext, "ui" | "mode">): WidgetOutcome {
   try {
     if (!widgetVisible) {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
-      return;
+      return { shown: false, reason: "hidden (`/rsi-top show` to bring it back)" };
     }
-    const workDir = process.cwd();
+    const workDir = widgetWorkDir ?? process.cwd();
     const cfg = loadConfig(workDir);
     const { runs, session } = readSession(workDir);
     if (runs.length === 0) {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
-      return;
+      return {
+        shown: false,
+        reason: `no autoresearch log in ${workDir} — run \`rsi-top init\` there, or \`/rsi-top show <dir>\``,
+      };
     }
     const stall = detectStall(runs, session, cfg.stall);
     const rows = readRows(dashboardPath(workDir, cfg.stateDir));
@@ -232,12 +260,14 @@ function refreshWidget(ctx: Pick<ExtensionContext, "ui" | "mode">): void {
     // Web gets the compact form (see WEB_MAX_LINES); the TUI has room for the table.
     const lines = ctx.mode === "rpc" ? compact(full) : full;
     ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
-  } catch {
+    return { shown: true, lines: lines.length };
+  } catch (err) {
     try {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
     } catch {
       // Nothing left to do; the session must survive a widget failure.
     }
+    return { shown: false, reason: `error reading ${widgetWorkDir ?? process.cwd()}: ${(err as Error).message}` };
   }
 }
 
@@ -251,12 +281,21 @@ export default function (pi: ExtensionAPI) {
       "RSI-top: `init` install hooks, `check` stall state, `intervene` emit a cohort, `show`/`hide` the widget",
     handler: async (args, ctx) => {
       const sub = (args ?? "").trim().split(/\s+/)[0] || "check";
-      const workDir = process.cwd();
+      const rest = (args ?? "").trim().split(/\s+/).slice(1).join(" ");
+      const workDir = resolveWorkDir(rest.trim() || undefined);
 
       if (sub === "hide" || sub === "show") {
         widgetVisible = sub === "show";
-        refreshWidget(ctx);
-        ctx.ui.notify(`rsi-top: widget ${widgetVisible ? "shown" : "hidden"}`, "info");
+        if (sub === "show" && rest.trim() !== "") widgetWorkDir = resolveWorkDir(rest.trim());
+        const outcome = refreshWidget(ctx);
+        // Report what actually happened. `show` used to say "widget shown" while it was
+        // clearing the widget because this directory had no log.
+        ctx.ui.notify(
+          outcome.shown
+            ? `rsi-top: widget shown (${outcome.lines} line${outcome.lines === 1 ? "" : "s"}) from ${widgetWorkDir ?? process.cwd()}`
+            : `rsi-top: widget NOT shown — ${outcome.reason}`,
+          outcome.shown ? "info" : "warning",
+        );
         return;
       }
 
@@ -295,7 +334,12 @@ export default function (pi: ExtensionAPI) {
   // Surface a stall at startup so it is visible without asking. Never throws: an extension
   // must not break a session, and the hooks fail open for the same reason.
   pi.on("session_start", async (_event, ctx) => {
-    refreshWidget(ctx);
+    const outcome = refreshWidget(ctx);
+    // A silent empty widget is indistinguishable from a broken extension. Say why once, at
+    // startup, and only when the user has not deliberately hidden it.
+    if (!outcome.shown && widgetVisible && outcome.reason.startsWith("no autoresearch log")) {
+      ctx.ui.notify(`rsi-top: idle — ${outcome.reason}`, "info");
+    }
     try {
       const workDir = process.cwd();
       const cfg = loadConfig(workDir);

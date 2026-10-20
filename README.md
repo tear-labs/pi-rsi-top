@@ -117,7 +117,21 @@ invisible in the browser. This way the same renderer appears in the terminal and
 ```
 /rsi-top hide             # this session only
 /rsi-top show             # back on
+/rsi-top show ~/code/Experiments/OOD_v6_agent_active   # point it at a run elsewhere
 ```
+
+**The widget reads the *current directory*, not your last run.** Pi is usually opened in a
+scratch directory, so a widget that has never been told where to look has no log to draw and
+stays empty. `/rsi-top show <dir>` fixes that for the session, or set `RSI_TOP_CWD` before
+launching:
+
+```
+RSI_TOP_CWD=~/code/Experiments/OOD_v6_agent_active pi
+```
+
+When there is nothing to draw, the extension now says so instead of leaving a blank strip:
+`rsi-top: idle — no autoresearch log in /home/you/scratch — run \`rsi-top init\` there, or
+\`/rsi-top show <dir>\``.
 
 Or from the environment, before launching pi:
 
